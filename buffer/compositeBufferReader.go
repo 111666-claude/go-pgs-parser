@@ -38,27 +38,32 @@ func (c *compositeBufferReader) ReadBytes(count int) (BufferAdapter, error) {
 	}
 
 	var chunks []BufferAdapter
-	accumulated := 0
+	remaining := count
 
-	for true {
+	for remaining > 0 {
 		if len(c.buffers) == 0 {
 			return nil, errors.New("trying to read more bytes than available")
 		}
-		buffer := c.buffers[0]
-		c.buffers = append(c.buffers[:0], c.buffers[1:]...)
-		required := count - accumulated
 
-		if buffer.Length() == required {
-			chunks = append(chunks, buffer)
-			break
-		} else if buffer.Length() > required {
-			chunks = append(chunks, buffer.SubArray(0, required))
-			c.buffers = append([]BufferAdapter{buffer.SubArray(required, buffer.Length())}, c.buffers...)
-			break
+		head := c.buffers[0]
+
+		if head.Length() <= remaining {
+			// Consume the whole chunk. Build a fresh slice header so dropping
+			// the front element never aliases a backing array still referenced
+			// by chunks handed out earlier.
+			chunks = append(chunks, head)
+			remaining -= head.Length()
+			c.buffers = append([]BufferAdapter{}, c.buffers[1:]...)
+			continue
 		}
 
-		accumulated += buffer.Length()
-		chunks = append(chunks, buffer)
+		// Split the head: return its prefix, keep the suffix queued. Both
+		// slices are independent views produced via SubArray.
+		prefix := head.SubArray(0, remaining)
+		suffix := head.SubArray(remaining, head.Length())
+		chunks = append(chunks, prefix)
+		c.buffers[0] = suffix
+		remaining = 0
 	}
 
 	return NewCompositeBuffer(chunks), nil

@@ -43,14 +43,32 @@ type Segment struct {
 	Header SegmentHeader
 }
 
+type CompositionObject struct {
+	ObjectId                         int
+	WindowId                         int
+	ObjectCroppedFlag                bool
+	ObjectHorizontalPosition         int
+	ObjectVerticalPosition           int
+	ObjectCroppingHorizontalPosition int
+	ObjectCroppingVerticalPosition   int
+	ObjectCroppingWidth              int
+	ObjectCroppingHeight             int
+}
+
 type PresentationCompositionSegment struct {
-	Width                            int
-	Height                           int
-	CompositionNumber                int
-	CompositionState                 CompositionState
-	PaletteUpdateFlag                bool
-	PaletteId                        int
-	CompositionObjectCount           int
+	Width                  int
+	Height                 int
+	CompositionNumber      int
+	CompositionState       CompositionState
+	PaletteUpdateFlag      bool
+	PaletteId              int
+	CompositionObjectCount int
+	// CompositionObjects holds every object referenced by this PCS.
+	// A PCS with zero objects is an explicit screen clear.
+	CompositionObjects []CompositionObject
+
+	// The following fields mirror the first entry of CompositionObjects and
+	// are kept for backward compatibility with the per-object export path.
 	ObjectId                         int
 	WindowId                         int
 	ObjectCroppedFlag                bool

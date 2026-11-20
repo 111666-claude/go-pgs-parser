@@ -1,7 +1,7 @@
 package pgs
 
 import (
-	"github.com/mbiamont/go-pgs-parser/buffer"
+	"github.com/mbiamont/go-pgs-parser/composition"
 	"github.com/mbiamont/go-pgs-parser/displaySet"
 	"image/jpeg"
 	"image/png"
@@ -15,6 +15,12 @@ type PgsParser interface {
 
 	// ParseDisplaySets Parse the input file path and call the onDisplaySet function for each DisplaySet found
 	ParseDisplaySets(inputFilePath string, onDisplaySet func(data displaySet.DisplaySet, startTime time.Duration) error) error
+
+	// ComposeTimeline composes every display set into a transparent RGBA
+	// canvas and returns the start/end interval of each valid display period,
+	// including transparent clear frames. Per-frame problems are reported in
+	// Frame.Issues; structural stream errors are returned.
+	ComposeTimeline(inputFilePath string, opts *composition.Options) ([]composition.Frame, error)
 
 	// ConvertToPngImages Parse the input file path and save each subtitle picture as a PNG using fileCreator function to create the PNG file
 	ConvertToPngImages(inputFilePath string, fileCreator func(index int, startTime time.Duration) (*os.File, error)) error
@@ -51,45 +57,22 @@ func (p *pgsParser) ParsePgsFile(inputFilePath string, onImage func(index int, s
 }
 
 func (p *pgsParser) ParseDisplaySets(inputFilePath string, onDisplaySet func(data displaySet.DisplaySet, startTime time.Duration) error) error {
-	file, err := os.ReadFile(inputFilePath)
+	return displaySet.ReadDisplaySetsFromFile(inputFilePath, onDisplaySet)
+}
+
+func (p *pgsParser) ComposeTimeline(inputFilePath string, opts *composition.Options) ([]composition.Frame, error) {
+	var sets []displaySet.DisplaySet
+
+	err := p.ParseDisplaySets(inputFilePath, func(data displaySet.DisplaySet, startTime time.Duration) error {
+		sets = append(sets, data)
+		return nil
+	})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	parser := displaySet.NewDisplaySetParser()
-	accumulatedBuffer := buffer.NewCompositeBufferReader()
-	requestedBytes := 13
-
-	accumulatedBuffer.Add(file)
-
-	for accumulatedBuffer.Length() >= requestedBytes {
-		bytes, err := accumulatedBuffer.ReadBytes(requestedBytes)
-
-		if err != nil {
-			return err
-		}
-
-		requestedBytes, err = parser.Consume(bytes)
-
-		if err != nil {
-			return err
-		}
-
-		if parser.IsReady() {
-			ds := parser.Next()
-			if ds != nil {
-				set := *ds
-				err = onDisplaySet(set, set.StartTime())
-
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	return nil
+	return composition.NewComposer().ComposeDisplaySets(sets, opts)
 }
 
 func (p *pgsParser) ConvertToPngImages(inputFilePath string, fileCreator func(index int, startTime time.Duration) (*os.File, error)) error {

@@ -198,6 +198,8 @@ func (d *displaySetParser) Consume(bf buffer.BufferAdapter) (int, error) {
 			StartTime:             startTimeStamp,
 		}
 
+		// Consume returns the number of payload bytes the caller must feed in
+		// next; the following call will request the 13-byte header again.
 		return segmentSize, nil
 	}
 }
@@ -264,82 +266,106 @@ func (d *displaySetParser) ParsePcsSegment(reader buffer.BufferReader, header se
 		return nil, err
 	}
 
-	objectId, err := reader.ReadBytesWithLimit(2, &limit)
+	compositionObjects := make([]segment.CompositionObject, 0, compositionObjectCount)
 
-	if err != nil {
-		return nil, err
+	for i := 0; i < compositionObjectCount; i++ {
+		objectId, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+
+		windowId, err := reader.ReadBytesWithLimit(1, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+
+		objectCroppedFlagByte, err := reader.ReadBytesWithLimit(1, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+
+		objectCroppedFlag, err := d.SegmentMapper.ToObjectCroppedFlag(byte(objectCroppedFlagByte))
+
+		if err != nil {
+			return nil, err
+		}
+
+		objectHorizontalPosition, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+		objectVerticalPosition, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+		objectCroppingHorizontalPosition, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+		objectCroppingVerticalPosition, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+		objectCroppingWidth, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+		objectCroppingHeight, err := reader.ReadBytesWithLimit(2, &limit)
+
+		if err != nil {
+			return nil, err
+		}
+
+		compositionObjects = append(compositionObjects, segment.CompositionObject{
+			ObjectId:                         objectId,
+			WindowId:                         windowId,
+			ObjectCroppedFlag:                objectCroppedFlag,
+			ObjectHorizontalPosition:         objectHorizontalPosition,
+			ObjectVerticalPosition:           objectVerticalPosition,
+			ObjectCroppingHorizontalPosition: objectCroppingHorizontalPosition,
+			ObjectCroppingVerticalPosition:   objectCroppingVerticalPosition,
+			ObjectCroppingWidth:              objectCroppingWidth,
+			ObjectCroppingHeight:             objectCroppingHeight,
+		})
 	}
 
-	windowId, err := reader.ReadBytesWithLimit(1, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-
-	objectCroppedFlagByte, err := reader.ReadBytesWithLimit(1, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-
-	objectCroppedFlag, err := d.SegmentMapper.ToObjectCroppedFlag(byte(objectCroppedFlagByte))
-
-	if err != nil {
-		return nil, err
-	}
-
-	objectHorizontalPosition, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-	objectVerticalPosition, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-	objectCroppingHorizontalPosition, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-	objectCroppingVerticalPosition, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-	objectCroppingWidth, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-	objectCroppingHeightPosition, err := reader.ReadBytesWithLimit(2, &limit)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &segment.PresentationCompositionSegment{
-		Width:                            width,
-		Height:                           height,
-		CompositionNumber:                compositionNumber,
-		CompositionState:                 compositionState,
-		PaletteUpdateFlag:                paletteUpdateFlag,
-		PaletteId:                        paletteId,
-		CompositionObjectCount:           compositionObjectCount,
-		ObjectId:                         objectId,
-		WindowId:                         windowId,
-		ObjectCroppedFlag:                objectCroppedFlag,
-		ObjectHorizontalPosition:         objectHorizontalPosition,
-		ObjectVerticalPosition:           objectVerticalPosition,
-		ObjectCroppingHorizontalPosition: objectCroppingHorizontalPosition,
-		ObjectCroppingVerticalPosition:   objectCroppingVerticalPosition,
-		ObjectCroppingWidth:              objectCroppingWidth,
-		ObjectCroppingHeight:             objectCroppingHeightPosition,
+	pcs := &segment.PresentationCompositionSegment{
+		Width:                  width,
+		Height:                 height,
+		CompositionNumber:      compositionNumber,
+		CompositionState:       compositionState,
+		PaletteUpdateFlag:      paletteUpdateFlag,
+		PaletteId:              paletteId,
+		CompositionObjectCount: compositionObjectCount,
+		CompositionObjects:     compositionObjects,
 		Segment: segment.Segment{
 			Header: header,
 		},
-	}, nil
+	}
+
+	// Mirror the first composition object into the legacy single-object fields.
+	if compositionObjectCount > 0 {
+		first := compositionObjects[0]
+		pcs.ObjectId = first.ObjectId
+		pcs.WindowId = first.WindowId
+		pcs.ObjectCroppedFlag = first.ObjectCroppedFlag
+		pcs.ObjectHorizontalPosition = first.ObjectHorizontalPosition
+		pcs.ObjectVerticalPosition = first.ObjectVerticalPosition
+		pcs.ObjectCroppingHorizontalPosition = first.ObjectCroppingHorizontalPosition
+		pcs.ObjectCroppingVerticalPosition = first.ObjectCroppingVerticalPosition
+		pcs.ObjectCroppingWidth = first.ObjectCroppingWidth
+		pcs.ObjectCroppingHeight = first.ObjectCroppingHeight
+	}
+
+	return pcs, nil
 }
 
 func (d *displaySetParser) ParseWdsSegment(reader buffer.BufferReader, header segment.SegmentHeader) (*segment.WindowDefinitionSegment, error) {
